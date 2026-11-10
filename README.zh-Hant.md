@@ -22,11 +22,11 @@
 |---|---|---|
 | ![](docs/screenshot-0.png) | ![](docs/screenshot-75.png) | ![](docs/screenshot-100.png) |
 
-| 靜音 | 在桌面上的實際大小 |
+| 剛醒來 | 靜音 |
 |---|---|
-| ![](docs/screenshot-muted.png) | ![](docs/screenshot-desktop.png) |
+| ![](docs/screenshot-35.png) | ![](docs/screenshot-muted.png) |
 
-示範影片和大張截圖，是把 App 顯示的那一頁逐格算出來的（`scripts/render_demo.mjs`），所以畫面裡只有滑桿。最後一張是 App 預設大小的真實螢幕截圖。
+示範影片和截圖，是把 App 顯示的那一頁逐格算出來的（`scripts/render_demo.mjs`），所以畫面裡只有滑桿，而且比實際大很多。在選單列上，面板預設只有 230 pt 寬。
 
 ## 安裝
 
