@@ -18,9 +18,15 @@
 
 它自己不會發出任何聲音，也不收集任何資料。
 
-| 滑桿 | 靜音 | 用快速鍵叫出來 |
+| 小聲 | 大聲一點 | 開到底 |
 |---|---|---|
-| ![](docs/screenshot-slider.png) | ![](docs/screenshot-muted.png) | ![](docs/screenshot-hotkey.png) |
+| ![](docs/screenshot-0.png) | ![](docs/screenshot-75.png) | ![](docs/screenshot-100.png) |
+
+| 靜音 | 在桌面上的實際大小 |
+|---|---|
+| ![](docs/screenshot-muted.png) | ![](docs/screenshot-desktop.png) |
+
+示範影片和大張截圖，是把 App 顯示的那一頁逐格算出來的（`scripts/render_demo.mjs`），所以畫面裡只有滑桿。最後一張是 App 預設大小的真實螢幕截圖。
 
 ## 安裝
 

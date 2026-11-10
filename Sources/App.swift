@@ -132,7 +132,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
 
     var takeKeys: Bool { defaults.object(forKey: "takeKeys") as? Bool ?? true }
     var sizeIndex: Int { min(2, max(0, defaults.integer(forKey: "size"))) }
-    var panelSize: NSSize { let w = Self.widths[sizeIndex]; return NSSize(width: w, height: (w * 0.5).rounded() + 48) }
+    var panelSize: NSSize {
+        // 錄影／截圖用：--panel-size 900x560 可以把面板放大成任意尺寸（一般使用只有小中大三種）
+        if let i = CommandLine.arguments.firstIndex(of: "--panel-size"), i + 1 < CommandLine.arguments.count {
+            let p = CommandLine.arguments[i + 1].split(separator: "x").compactMap { Double($0) }
+            if p.count == 2 { return NSSize(width: p[0], height: p[1]) }
+        }
+        let w = Self.widths[sizeIndex]; return NSSize(width: w, height: (w * 0.5).rounded() + 48)
+    }
 
     func applicationDidFinishLaunching(_ note: Notification) {
         let config = WKWebViewConfiguration()

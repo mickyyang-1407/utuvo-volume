@@ -18,9 +18,15 @@ A liquid-glass volume slider for the macOS menu bar. Drag the glass and you are 
 
 It makes no sound of its own and collects nothing.
 
-| Slider | Muted | Shown by a shortcut |
+| Quiet | Louder | Maximum |
 |---|---|---|
-| ![](docs/screenshot-slider.png) | ![](docs/screenshot-muted.png) | ![](docs/screenshot-hotkey.png) |
+| ![](docs/screenshot-0.png) | ![](docs/screenshot-75.png) | ![](docs/screenshot-100.png) |
+
+| Muted | Actual size on the desktop |
+|---|---|
+| ![](docs/screenshot-muted.png) | ![](docs/screenshot-desktop.png) |
+
+The demo clip and the large stills are rendered frame by frame from the page the app displays (`scripts/render_demo.mjs`), so they show the slider only. The last picture is a real screenshot of the app at its default size.
 
 ## Install
 
