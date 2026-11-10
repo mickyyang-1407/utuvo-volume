@@ -22,11 +22,11 @@ It makes no sound of its own and collects nothing.
 |---|---|---|
 | ![](docs/screenshot-0.png) | ![](docs/screenshot-75.png) | ![](docs/screenshot-100.png) |
 
-| Waking up | Muted |
+| Muted | Actual size on the desktop |
 |---|---|
-| ![](docs/screenshot-35.png) | ![](docs/screenshot-muted.png) |
+| ![](docs/screenshot-muted.png) | ![](docs/screenshot-desktop.png) |
 
-The demo clip and the stills are rendered frame by frame from the page the app displays (`scripts/render_demo.mjs`), so they show the slider only, larger than life. In the menu bar the panel is 230 pt wide by default.
+The demo clip and the large stills are rendered frame by frame from the page the app displays (`scripts/render_demo.mjs`), so they show the slider only, larger than life. The last picture is a real screenshot of the app at its default size (230 pt wide).
 
 ## Install
 
