@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>UTUVO Volume</title>
+<style>
+  :root { color-scheme: dark; --ink: #e9e9f5; --dim: #9a9ec2; --card: #23253b; --line: #34375a; --acc: #9db4ff; --ok: #5df2a0; --warn: #ffd166; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #181927; color: var(--ink); font: 14px/1.55 "SF Pro Text", "PingFang TC", system-ui, sans-serif; -webkit-user-select: none; cursor: default; }
+  body { padding: 22px 24px 28px; }
+  h1 { font-size: 21px; margin: 0 0 2px; }
+  .sub { color: var(--dim); margin: 0 0 16px; }
+  .en { color: var(--dim); font-size: 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+  .head { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; }
+  .num { flex: none; width: 24px; height: 24px; border-radius: 50%; background: #34375a; display: grid; place-items: center; font-size: 13px; }
+  .card.done .num { background: var(--ok); color: #10231a; }
+  .pill { margin-left: auto; font-size: 12px; font-weight: 500; padding: 2px 9px; border-radius: 99px; background: #34375a; color: var(--dim); white-space: nowrap; }
+  .pill.ok { background: rgba(93,242,160,.16); color: var(--ok); }
+  .pill.warn { background: rgba(255,209,102,.16); color: var(--warn); }
+  p { margin: 6px 0 0 34px; }
+  ol { margin: 6px 0 0 34px; padding-left: 18px; }
+  .row { display: flex; align-items: center; gap: 10px; margin: 10px 0 0 34px; flex-wrap: wrap; }
+  button { font: inherit; color: var(--ink); background: #34375a; border: 1px solid #474b78; border-radius: 8px; padding: 5px 12px; cursor: pointer; }
+  button:hover { background: #3e4270; }
+  button.primary { background: #4b62c9; border-color: #6d83e6; }
+  button.on { background: #4b62c9; border-color: #6d83e6; }
+  button.ghost { background: transparent; border-color: transparent; color: var(--dim); padding: 5px 6px; }
+  .keys { margin: 10px 0 0 34px; display: grid; grid-template-columns: 1fr auto auto; gap: 8px 10px; align-items: center; }
+  .key { min-width: 108px; text-align: center; font-variant-numeric: tabular-nums; }
+  .key.rec { border-color: var(--warn); color: var(--warn); }
+  .note { color: var(--dim); font-size: 12.5px; }
+  .err { color: #ff8a8a; font-size: 12.5px; margin: 8px 0 0 34px; }
+  kbd { font: inherit; background: #34375a; border-radius: 5px; padding: 0 5px; }
+</style>
+</head>
+<body>
+  <h1>UTUVO Volume <span class="en" id="ver"></span></h1>
+  <p class="sub" style="margin-left:0">照下面四步做完，它就取代系統原本的音量調節。<br><span class="en">Four steps and it replaces the system volume control.</span></p>
+
+  <div class="card done" id="c1">
+    <div class="head"><span class="num">1</span>拖玻璃調音量 <span class="en">Drag the glass</span></div>
+    <p>點選單列的喇叭圖示，滑桿就會出現；拖玻璃、滾輪、方向鍵都能調，點上面的數字是靜音。對圖示按右鍵可以回到這一頁。<br><span class="en">Click the speaker in the menu bar. Drag, scroll or use arrow keys; click the number to mute. Right-click the icon to come back here.</span></p>
+    <div class="row"><button data-cmd="try">讓它出來一下 Show it</button><span class="note" id="dev"></span></div>
+  </div>
+
+  <div class="card" id="c2">
+    <div class="head"><span class="num">2</span>讓鍵盤的音量鍵歸它管 <span class="en">Take over the volume keys</span><span class="pill" id="axPill"></span></div>
+    <p>macOS 規定要你親自同意，App 才能接手音量鍵。同意後，按鍵盤的音量大、音量小、靜音，出來的就是這條滑桿，不再是系統那個。<br><span class="en">macOS needs your permission before an app can handle the volume keys.</span></p>
+    <ol>
+      <li>按下面的按鈕，系統設定會打開「隱私權與安全性 › 輔助使用」。</li>
+      <li>在清單裡把 <b>UTUVO Volume</b> 的開關打開（會要你按指紋或輸入密碼）。</li>
+      <li>回到這裡，右上角變成綠色的「已接手」就好了，不用重開。</li>
+    </ol>
+    <div class="row"><button class="primary" data-cmd="ax">打開輔助使用設定 Open Accessibility</button>
+      <button id="takeBtn" data-cmd="takeKeys"></button></div>
+    <p class="note">按住 <kbd>⌥</kbd><kbd>⇧</kbd> 再按音量鍵是四分之一格的細調。錄音介面這類調不動的輸出裝置，音量鍵會自動交還系統。</p>
+  </div>
+
+  <div class="card" id="c3">
+    <div class="head"><span class="num">3</span>把系統的聲音圖示收起來 <span class="en">Hide the system Sound icon</span></div>
+    <p>這樣選單列上就只剩一個喇叭。這一步 macOS 不讓 App 代勞，要你自己點：<br><span class="en">So only one speaker is left in the menu bar. macOS only lets you do this yourself.</span></p>
+    <ol>
+      <li>按下面的按鈕打開「控制中心」設定。</li>
+      <li>找到「聲音」，把「在選單列中顯示」改成<b>不顯示</b>。</li>
+    </ol>
+    <div class="row"><button data-cmd="controlcenter">打開控制中心設定 Open Control Center</button></div>
+  </div>
+
+  <div class="card" id="c4">
+    <div class="head"><span class="num">4</span>開機就在 <span class="en">Launch at login</span><span class="pill" id="loginPill"></span></div>
+    <div class="row"><button id="loginBtn" data-cmd="login"></button></div>
+  </div>
+
+  <div class="card">
+    <div class="head"><span class="num">⌨</span>自訂快速鍵 <span class="en">Custom shortcuts</span></div>
+    <p>想用別的按鍵調音量就設在這裡（不需要第 2 步的權限）。按「設定」後直接按下你要的組合，要含 <kbd>⌃</kbd> <kbd>⌥</kbd> <kbd>⇧</kbd> <kbd>⌘</kbd> 其中至少一個，或單獨一顆 F 鍵；按 <kbd>Esc</kbd> 取消。<br><span class="en">Press “Set”, then your combo (with at least one modifier, or a bare F-key). Esc cancels.</span></p>
+    <div class="keys" id="keys"></div>
+    <div class="err" id="err" hidden></div>
+  </div>
+
+  <div class="card">
+    <div class="head"><span class="num">↔</span>滑桿大小 <span class="en">Size</span></div>
+    <div class="row" id="sizes"><button data-size="0">小 Small</button><button data-size="1">中 Medium</button><button data-size="2">大 Large</button></div>
+  </div>
+
+  <p class="note" style="margin-left:0">想恢復系統原本的樣子：對選單列圖示按右鍵 ›「結束」，音量鍵立刻回到系統手上；再到控制中心把聲音圖示開回來。<br>To undo everything: right-click the icon › Quit, then show the Sound icon again in Control Center.</p>
+
+<script>
+const post = m => { try { window.webkit.messageHandlers.guide.postMessage(m); } catch (e) {} };
+const $ = id => document.getElementById(id);
+const ROWS = [['up', '音量大 Volume up'], ['down', '音量小 Volume down'], ['mute', '靜音 Mute'], ['toggle', '打開／收起滑桿 Show slider']];
+$('keys').innerHTML = ROWS.map(([id, name]) => `<span>${name}</span><button class="key" data-cmd="record" data-id="${id}" id="k-${id}"></button><button class="ghost" data-cmd="clear" data-id="${id}">清除 Clear</button>`).join('');
+document.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.size !== undefined) post({ cmd: 'size', value: +b.dataset.size });
+  else if (b.dataset.cmd) post({ cmd: b.dataset.cmd, id: b.dataset.id });
+});
+window.__guide = { set(s) {
+  $('ver').textContent = s.version;
+  $('dev').textContent = '目前輸出 Output：' + s.device + (s.supported ? '' : '（這個裝置調不動 fixed volume）');
+  const taking = s.tapOn && s.takeKeys;
+  $('axPill').textContent = !s.trusted ? '尚未同意 Not allowed yet' : taking ? '已接手 Active' : s.takeKeys ? '啟動中… Starting' : '已暫停 Paused';
+  $('axPill').className = 'pill ' + (taking ? 'ok' : 'warn');
+  $('c2').classList.toggle('done', taking);
+  $('takeBtn').textContent = s.takeKeys ? '暫時交還系統 Give keys back' : '重新接手 Take keys again';
+  $('takeBtn').hidden = !s.trusted;
+  $('loginPill').textContent = s.login ? '已開啟 On' : '未開啟 Off'; $('loginPill').className = 'pill ' + (s.login ? 'ok' : '');
+  $('loginBtn').textContent = s.login ? '關閉 Turn off' : '登入時自動啟動 Turn on'; $('loginBtn').className = s.login ? '' : 'primary';
+  $('c4').classList.toggle('done', s.login);
+  ROWS.forEach(([id]) => { const b = $('k-' + id), rec = s.recording === id;
+    b.textContent = rec ? '請按按鍵… Press keys' : (s.hotkeys[id] || '設定 Set'); b.classList.toggle('rec', rec); });
+  $('err').hidden = !s.failed; $('err').textContent = s.failed ? '有一組快速鍵被系統或別的 App 佔用了，請換一組。 One shortcut is already taken — pick another.' : '';
+  document.querySelectorAll('#sizes button').forEach(b => b.classList.toggle('on', +b.dataset.size === s.size));
+} };
+post({ cmd: 'state' });
+</script>
+</body>
+</html>

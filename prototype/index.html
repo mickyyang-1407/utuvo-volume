@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>錄音室音量滑桿 · Studio Volume Slider</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: radial-gradient(120% 90% at 50% 40%, #262842 0%, #1a1b2c 55%, #131420 100%);
+    color: #e9e9f5;
+    font-family: "SF Pro Rounded", ui-rounded, "PingFang TC", "Noto Sans TC", system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 6px; overflow: hidden;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+  }
+  .label { font-size: 13px; letter-spacing: .28em; color: #8f93b8; text-transform: uppercase; }
+  .value { font-size: clamp(40px, 9vw, 76px); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+  .value small { font-size: .35em; color: #8f93b8; margin-left: .15em; }
+  canvas { width: min(96vw, 980px); touch-action: none; cursor: grab; outline: none; display: block; }
+  canvas.drag { cursor: grabbing; }
+  canvas:focus-visible { filter: drop-shadow(0 0 6px #9db4ff); }
+  .hint { font-size: 14px; color: #8f93b8; transition: opacity .6s; text-align: center; padding: 0 16px; }
+  .hint.gone { opacity: 0; }
+</style>
+</head>
+<body>
+  <div class="label">音量 Volume</div>
+  <div class="value"><span id="num">35</span><small>%</small></div>
+  <canvas id="stage" tabindex="0" role="slider" aria-label="音量 Volume" aria-valuemin="0" aria-valuemax="100" aria-valuenow="35"></canvas>
+  <div class="hint" id="hint">拖曳玻璃球，把音樂開大聲 · Drag the glass to turn the music up</div>
+
+<script>
+(() => {
+'use strict';
+const SW = 240, SH = 56;                       // 像素場景的邏輯大小
+const cv = document.getElementById('stage'), ctx = cv.getContext('2d');
+const numEl = document.getElementById('num'), hintEl = document.getElementById('hint');
+const mk = () => { const c = document.createElement('canvas'); c.width = SW; c.height = SH; return c; };
+const cA = mk(), cB = mk(), gA = cA.getContext('2d'), gB = cB.getContext('2d');
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const rnd = i => { const s = Math.sin(i * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+
+/* ───────── 音樂：瀏覽器即時合成的 lo-fi 小循環 ───────── */
+const BPM = 84, SPB = 60 / BPM, STEP = SPB / 4;
+let ac = null, master, lp, bus, noiseBuf, t0 = 0, nextStep = 0;
+const CHORDS = [[53, 57, 60, 64], [52, 55, 59, 62], [50, 53, 57, 60], [48, 52, 55, 59]];
+const MELODY = [72, 0, 0, 76, 0, 79, 0, 0, 77, 0, 76, 0, 72, 0, 0, 0,
+                71, 0, 0, 74, 0, 0, 79, 0, 76, 0, 0, 0, 74, 0, 71, 0,
+                69, 0, 0, 72, 0, 77, 0, 0, 76, 0, 72, 0, 69, 0, 0, 0,
+                67, 0, 0, 71, 0, 0, 76, 0, 74, 0, 0, 72, 0, 0, 0, 0];
+const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+
+function initAudio() {
+  if (ac) { if (ac.state === 'suspended') ac.resume(); return; }
+  const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+  ac = new AC();
+  const comp = ac.createDynamicsCompressor();
+  master = ac.createGain(); master.gain.value = 0;
+  lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 400; lp.Q.value = 0.5;
+  bus = ac.createGain();
+  bus.connect(lp); lp.connect(master); master.connect(comp); comp.connect(ac.destination);
+  noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+  const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  // 黑膠炒豆聲
+  const cb = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate), cd = cb.getChannelData(0);
+  for (let i = 0; i < cd.length; i++) cd[i] = Math.random() < 0.0012 ? (Math.random() * 2 - 1) : (Math.random() * 2 - 1) * 0.015;
+  const cs = ac.createBufferSource(); cs.buffer = cb; cs.loop = true;
+  const cg = ac.createGain(); cg.gain.value = 0.25; cs.connect(cg); cg.connect(bus); cs.start();
+  t0 = ac.currentTime + 0.1; nextStep = 0;
+  setInterval(schedule, 25);
+}
+function tone(t, f, dur, type, g) {
+  const o = ac.createOscillator(), a = ac.createGain();
+  o.type = type; o.frequency.value = f;
+  a.gain.setValueAtTime(0.0001, t); a.gain.linearRampToValueAtTime(g, t + 0.012);
+  a.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(a); a.connect(bus); o.start(t); o.stop(t + dur + 0.05);
+}
+function noise(t, dur, type, f, g) {
+  const s = ac.createBufferSource(); s.buffer = noiseBuf;
+  const fl = ac.createBiquadFilter(); fl.type = type; fl.frequency.value = f;
+  const a = ac.createGain(); a.gain.setValueAtTime(g, t); a.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  s.connect(fl); fl.connect(a); a.connect(bus); s.start(t, Math.random() * 0.5, dur + 0.05);
+}
+function kick(t, g) {
+  const o = ac.createOscillator(), a = ac.createGain();
+  o.frequency.setValueAtTime(130, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.13);
+  a.gain.setValueAtTime(g, t); a.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+  o.connect(a); a.connect(bus); o.start(t); o.stop(t + 0.35);
+}
+function playStep(n, t) {
+  const s = n % 16, bar = Math.floor(n / 16) % 4, ch = CHORDS[bar];
+  if (s === 0 || s === 8) kick(t, 0.9);
+  if (s === 10) kick(t, 0.5);
+  if (s === 4 || s === 12) { noise(t, 0.14, 'bandpass', 1900, 0.32); tone(t, 185, 0.09, 'triangle', 0.12); }
+  if (s % 2 === 0) noise(t, s % 4 === 2 ? 0.07 : 0.035, 'highpass', 7500, s % 4 === 2 ? 0.09 : 0.05);
+  if (s === 0 || s === 6) ch.forEach((m, i) => {
+    const d = s === 0 ? 1.9 : 0.9, tt = t + i * 0.012;
+    tone(tt, hz(m + 12), d, 'triangle', 0.075); tone(tt, hz(m + 12) * 1.003, d, 'sine', 0.06);
+  });
+  if (s === 0 || s === 7 || s === 10) tone(t, hz(ch[0] - 12), 0.42, 'sine', 0.42);
+  const mel = MELODY[(bar * 16 + s) % 64];
+  if (mel) { tone(t, hz(mel), 0.5, 'sine', 0.10); tone(t, hz(mel) * 2, 0.18, 'sine', 0.025); }
+}
+function schedule() {
+  if (!ac) return;
+  while (t0 + nextStep * STEP < ac.currentTime + 0.14) {
+    const sw = (nextStep % 2 === 1) ? STEP * 0.2 : 0;
+    playStep(nextStep, Math.max(ac.currentTime, t0 + nextStep * STEP + sw));
+    nextStep++;
+  }
+}
+function tick(strong) {              // 拖動時的刻度聲
+  if (!ac) return;
+  const t = ac.currentTime, o = ac.createOscillator(), a = ac.createGain();
+  o.type = 'triangle'; o.frequency.setValueAtTime(strong ? 1500 : 2300, t);
+  o.frequency.exponentialRampToValueAtTime(strong ? 700 : 1500, t + 0.03);
+  a.gain.setValueAtTime(strong ? 0.09 : 0.035, t); a.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+  o.connect(a); a.connect(ac.destination); o.start(t); o.stop(t + 0.06);
+}
+const clock = () => ac ? Math.max(0, ac.currentTime - t0) : performance.now() / 1000;
+
+/* ───────── 像素場景 ───────── */
+const STARS = Array.from({ length: 16 }, (_, i) => [72 + Math.floor(rnd(i) * 40), 7 + Math.floor(rnd(i + 50) * 14)]);
+const BOOK_N = ['#6d5a8c', '#4f6a8f', '#8c5a6b', '#5a8c7b', '#8c7b5a', '#7a5a8c'];
+const BOOK_D = ['#ff6b6b', '#ffd166', '#06d6a0', '#4cc9f0', '#f78c6b', '#b388ff', '#ff9ecd'];
+const BULB = ['#ff6b6b', '#ffd166', '#06d6a0', '#4cc9f0', '#b388ff'];
+let notes = [];
+
+function drawScene(g, lit, v, tt, beat) {
+  const c = (n, d) => lit ? d : n;
+  const R = (x, y, w, h, col) => { g.fillStyle = col; g.fillRect(Math.round(x), Math.round(y), w, h); };
+  const ph = beat % 1, ib = Math.floor(beat), playing = v > 0.02;
+  const pulse = playing ? Math.exp(-ph * 5) : 0;
+  const bob = (playing && v > 0.3 && ph < 0.45) ? 1 : 0;
+  g.globalAlpha = 1;
+
+  // 牆、地板
+  R(0, 0, SW, 27, c('#2a2c54', '#a5dbea')); R(0, 27, SW, 12, c('#232549', '#f2b98f'));
+  R(0, 26, SW, 1, c('#3b3d70', '#fff3dc')); R(0, 39, SW, 2, c('#3b3d70', '#fff3dc'));
+  R(0, 41, SW, 15, c('#3a2a40', '#cf9160'));
+  for (let y = 44, k = 0; y < 56; y += 4, k++) {
+    R(0, y, SW, 1, c('#2e2034', '#b0764a'));
+    for (let x = (k % 2) * 17 + 9; x < SW; x += 34) R(x, y - 3, 1, 3, c('#2e2034', '#b0764a'));
+  }
+  // 地毯
+  R(84, 45, 58, 9, c('#5a2f55', '#e2566b')); R(86, 44, 54, 1, c('#5a2f55', '#e2566b')); R(86, 54, 54, 1, c('#5a2f55', '#e2566b'));
+  R(87, 46, 52, 1, c('#7a4a6a', '#ffd166')); R(87, 52, 52, 1, c('#7a4a6a', '#ffd166'));
+
+  // 書櫃
+  R(33, 6, 30, 35, c('#3a2740', '#8a5a3c')); R(35, 8, 26, 31, c('#1d1630', '#5d3a28'));
+  for (let s = 0; s < 4; s++) {
+    const sy = 8 + s * 8; R(35, sy + 7, 26, 1, c('#3a2740', '#8a5a3c'));
+    for (let x = 36, i = 0; x < 59; i++) {
+      const r = rnd(s * 31 + i), w = r > 0.6 ? 3 : 2, h = 5 + Math.floor(rnd(s * 17 + i + 9) * 2);
+      const pal = lit ? BOOK_D : BOOK_N;
+      if (rnd(s * 7 + i + 3) > 0.12) R(x, sy + 7 - h, w, h, pal[Math.floor(r * 97) % pal.length]);
+      x += w + (rnd(i + s) > 0.8 ? 1 : 0);
+    }
+  }
+
+  // 窗
+  R(69, 4, 46, 29, c('#4a4c80', '#fff3dc')); R(71, 6, 42, 25, c('#111638', '#7fd0ff'));
+  if (!lit) {
+    STARS.forEach(([x, y], i) => { if (Math.sin(tt * 2 + i * 1.7) > -0.4) R(x, y, 1, 1, i % 3 ? '#cfd6ff' : '#fff'); });
+    R(99, 9, 6, 6, '#f6f2cf'); R(100, 8, 4, 8, '#f6f2cf'); R(98, 10, 8, 4, '#f6f2cf');
+    R(101, 8, 5, 6, '#111638'); R(102, 9, 5, 5, '#111638');
+  } else {
+    R(98, 9, 6, 6, '#fff3a0'); R(99, 8, 4, 8, '#fff3a0'); R(97, 10, 8, 4, '#fff3a0');
+    for (let k = 0; k < 2; k++) { const x = 71 + ((tt * 2 + k * 26) % 50) - 8, y = 10 + k * 6; R(x, y, 8, 2, '#fff'); R(x + 2, y - 1, 4, 1, '#fff'); }
+  }
+  [[71, 8, 6], [77, 5, 5], [82, 9, 7], [89, 4, 4], [93, 7, 8], [101, 5, 5], [106, 8, 7]].forEach(([x, h, w], i) => {
+    R(x, 31 - h, w, h, c('#0a0d24', '#5aa9c9'));
+    if (!lit) for (let k = 0; k < 3; k++) if (rnd(i * 9 + k + Math.floor(tt / 3 + i)) > 0.5) R(x + 1 + (k * 2) % (w - 1), 31 - h + 1 + k * 2, 1, 1, '#ffd98a');
+  });
+  g.save(); g.beginPath(); g.rect(71, 6, 42, 25); g.clip(); g.restore();
+  R(91, 6, 2, 25, c('#4a4c80', '#fff3dc')); R(71, 17, 42, 2, c('#4a4c80', '#fff3dc'));
+  R(67, 32, 50, 2, c('#5557a0', '#ffffff'));
+  R(64, 2, 56, 1, c('#8a6a4a', '#b07a4a'));
+  R(65, 3, 6, 30, c('#7a3b4f', '#ff8a7a')); R(113, 3, 6, 30, c('#7a3b4f', '#ff8a7a'));
+  R(67, 3, 1, 30, c('#5e2c3d', '#e86f62')); R(116, 3, 1, 30, c('#5e2c3d', '#e86f62'));
+
+  // 盆栽（跟著拍子晃）
+  const sway = Math.round(Math.sin(tt * 1.6) * (0.5 + v * 1.6));
+  const G1 = c('#2f6b4f', '#4fc06a'), G2 = c('#22523f', '#2f9a55'), G3 = c('#3f8a63', '#86e08a');
+  R(17, 36 - bob, 2, 9 + bob, G2);
+  [[10, 33, 7, 5, G1], [19, 31, 8, 5, G1], [13, 27, 9, 6, G2], [9, 38, 6, 4, G2], [21, 37, 6, 4, G1], [15, 23, 6, 5, G1], [12, 29, 3, 2, G3], [21, 32, 3, 2, G3], [17, 24, 2, 2, G3]]
+    .forEach(([x, y, w, h, col], i) => R(x + (y < 34 ? sway : 0), y - bob, w, h, col));
+  R(12, 44, 12, 2, c('#9a5a44', '#e07a4f')); R(13, 46, 10, 7, c('#7d4636', '#c9643c')); R(14, 53, 8, 1, c('#5e3328', '#a44f2e'));
+
+  // 立燈
+  const lampOn = v > 0.1;
+  R(129, 18, 1, 23, c('#6a6c90', '#5b5d70')); R(126, 40, 7, 1, c('#6a6c90', '#5b5d70'));
+  const shade = lampOn ? c('#ffe7a0', '#fff0b8') : c('#55577a', '#e9d6a6');
+  R(127, 11, 5, 1, shade); R(126, 12, 7, 2, shade); R(125, 14, 9, 3, shade);
+  if (lampOn && !lit) {
+    g.globalAlpha = 0.07 + 0.10 * v + 0.04 * pulse;
+    for (let y = 17; y < 54; y++) { const w = (y - 17) * 1.1 + 9; R(129.5 - w / 2, y, Math.round(w), 1, '#ffd98a'); }
+    g.globalAlpha = 0.12 + 0.1 * v; R(122, 9, 15, 10, '#ffd98a'); g.globalAlpha = 1;
+  }
+
+  // 工作桌、喇叭、螢幕、混音台
+  R(140, 31, 60, 2, c('#6b4a3a', '#b9794a')); R(142, 33, 2, 8, c('#523829', '#96603a')); R(196, 33, 2, 8, c('#523829', '#96603a'));
+  R(158, 33, 26, 5, c('#523829', '#96603a')); R(169, 35, 4, 1, c('#8a6a4a', '#e0b070'));
+  const spk = x => {
+    R(x, 14, 12, 17, c('#14152a', '#3a3f52')); R(x, 14, 12, 1, c('#2a2c4a', '#565c72')); R(x, 14, 1, 17, c('#2a2c4a', '#565c72'));
+    R(x + 5, 16, 2, 2, c('#8a8fb0', '#e3e6f0'));
+    const s = pulse * v > 0.22 ? 8 : 6, cx = x + 6, cy = 25;
+    R(cx - s / 2 + 1, cy - s / 2, s - 2, s, c('#3b3f66', '#727890')); R(cx - s / 2, cy - s / 2 + 1, s, s - 2, c('#3b3f66', '#727890'));
+    R(cx - 1, cy - 1, 2, 2, c('#d9b13b', '#ffd23f'));
+  };
+  spk(143); spk(185);
+  R(159, 10, 22, 15, c('#0c0d1c', '#2a2d3d')); R(160, 11, 20, 13, c('#0f1a30', '#12314c')); R(169, 25, 2, 2, c('#0c0d1c', '#2a2d3d')); R(166, 27, 8, 0, '#000');
+  for (let i = 0; i < 10; i++) {
+    const h = playing ? 1 + Math.round((0.25 + 0.75 * Math.abs(Math.sin(i * 1.7 + Math.floor(beat * 4) * 1.3))) * v * 11) : 1;
+    for (let k = 0; k < h; k++) R(160 + i * 2, 23 - k, 1, 1, k > 8 ? '#ff5a5a' : k > 6 ? '#ffd166' : '#5df2a0');
+  }
+  R(155, 27, 30, 4, c('#3c3f63', '#cfd3df')); R(155, 27, 30, 1, c('#55598a', '#eef0f6'));
+  for (let i = 0; i < 9; i++) {
+    R(157 + i * 3, 28 + ((i * 5 + ib) % 2), 1, 1, c('#e6e8ff', '#3a3f52'));
+    R(158 + i * 3, 30, 1, 1, (i + 0.5) / 9 < v ? (i > 6 ? '#ff5a5a' : '#5df2a0') : c('#1c1d33', '#8b90a3'));
+  }
+
+  // 金唱片（爆音時歪掉）、門
+  const tilt = v > 0.9 ? 1 : 0;
+  R(203, 11, 9, 9, c('#8a6a4a', '#b9794a')); R(204, 12 + tilt, 7, 7, c('#1b1c33', '#fff7e6'));
+  R(205, 13 + tilt, 5, 5, c('#b8962e', '#ffc93c')); R(207, 15 + tilt, 1, 1, c('#1b1c33', '#fff7e6'));
+  R(215, 8, 22, 33, c('#4a4c80', '#fff3dc')); R(217, 10, 18, 31, c('#27407a', '#3f7fd0'));
+  R(219, 12, 14, 11, c('#2f4c90', '#5a97e0')); R(219, 26, 14, 12, c('#2f4c90', '#5a97e0')); R(219, 24, 2, 2, c('#d9b13b', '#ffd23f'));
+
+  // 串燈（跟拍閃）
+  for (let i = 0; i <= 14; i++) {
+    const x = 122 + i * 8, y = 1 + Math.round(3 * Math.sin(Math.PI * i / 14));
+    R(x - 4, y, 8, 1, c('#15162b', '#6b7088'));
+    const on = v > 0.7 ? true : v > 0.3 ? ((i + ib) % 2 === 0) : false;
+    R(x, y + 1, 2, 2, on ? BULB[(i + (v > 0.7 ? ib : 0)) % 5] : c('#3a3c5e', '#d9dce6'));
+    if (on && !lit) { g.globalAlpha = 0.18; R(x - 1, y, 4, 4, BULB[(i + (v > 0.7 ? ib : 0)) % 5]); g.globalAlpha = 1; }
+  }
+
+  // 貓
+  const O = c('#c98448', '#f6a55a'), OD = c('#9a5f30', '#d97f35'), W = c('#e8d9c4', '#fff6e8'), K = '#22182a';
+  if (v < 0.3) {                                   // 睡覺
+    const br = Math.sin(tt * 1.8) > 0 ? 1 : 0;
+    R(101, 48 - br, 14, 5 + br, O); R(102, 47 - br, 12, 1, O); R(104, 48 - br, 2, 1, OD); R(108, 48 - br, 2, 1, OD); R(112, 49, 2, 1, OD);
+    R(96, 48, 6, 5, O); R(96, 47, 2, 1, O); R(100, 47, 2, 1, O); R(97, 50, 1, 1, K); R(100, 50, 1, 1, K); R(98, 51, 2, 1, W);
+    R(113, 52, 5, 1, OD);
+    for (let k = 0; k < 3; k++) {
+      const a = ((tt * 0.5 + k / 3) % 1), x = 94 - a * 7, y = 44 - a * 12;
+      g.globalAlpha = (1 - a) * (lit ? 0.9 : 0.8); const s = k % 2 ? 3 : 2;
+      R(x, y, s, 1, c('#cfd6ff', '#5b6bd6')); R(x + s - 1 - (s > 2 ? 1 : 0), y + 1, 1, 1, c('#cfd6ff', '#5b6bd6')); R(x, y + (s > 2 ? 2 : 2), s, 1, c('#cfd6ff', '#5b6bd6'));
+    }
+    g.globalAlpha = 1;
+  } else {
+    const maxed = v >= 0.97, dance = v >= 0.7;
+    const jump = maxed ? 3 + Math.round(pulse * 2) : dance ? Math.round(Math.abs(Math.sin(ph * Math.PI)) * 2) : 0;
+    const hb = dance ? 0 : bob, by = 53 - jump;
+    const tailUp = ib % 2 === 0;
+    if (tailUp) { R(112, by - 7, 1, 6, OD); R(113, by - 8, 2, 1, OD); } else { R(112, by - 2, 4, 1, OD); R(115, by - 3, 1, 1, OD); }
+    R(103, by - 8, 9, 8, O); R(104, by - 9, 7, 1, O); R(105, by - 5, 5, 5, W); R(106, by - 8, 2, 1, OD); R(109, by - 8, 2, 1, OD);
+    R(103, by, 3, 1, OD); R(109, by, 3, 1, OD);
+    if (dance) { const up = ib % 2 === 0; R(101, by - (up ? 10 : 6), 2, 3, O); R(112, by - (up ? 6 : 10), 2, 3, O); }
+    const hy = by - 15 + hb;
+    R(102, hy, 11, 7, O); R(103, hy + 7, 9, 1, O); R(102, hy - 2, 2, 2, O); R(111, hy - 2, 2, 2, O); R(103, hy - 1, 1, 1, OD); R(111, hy - 1, 1, 1, OD);
+    R(106, hy, 3, 1, OD); R(105, hy + 4, 5, 3, W);
+    if (maxed) { R(104, hy + 1, 3, 3, '#fff'); R(108, hy + 1, 3, 3, '#fff'); R(105, hy + 2, 1, 1, K); R(109, hy + 2, 1, 1, K); R(106, hy + 5, 3, 2, K);
+      R(101, hy + 2, 1, 1, O); R(113, hy + 2, 1, 1, O); R(101, hy + 5, 1, 1, O); R(113, hy + 5, 1, 1, O); R(102, by - 6, 1, 1, O); R(112, by - 4, 1, 1, O); }
+    else if (dance && ph < 0.5) { R(104, hy + 3, 2, 1, K); R(109, hy + 3, 2, 1, K); R(107, hy + 5, 1, 1, '#ff8fa3'); }
+    else { R(105, hy + 2, 1, 2, K); R(109, hy + 2, 1, 2, K); R(107, hy + 5, 1, 1, '#ff8fa3'); }
+  }
+
+  // 飄出來的音符
+  notes.forEach(n => {
+    const a = n.age / n.life; if (a > 0.75 && Math.floor(n.age * 12) % 2) return;
+    const x = n.x + Math.sin(n.age * 3 + n.seed) * 3, y = n.y, col = lit ? n.cd : n.cn;
+    R(x + 2, y, 1, 5, col); R(x + 3, y, 2, 1, col); R(x + 4, y + 1, 1, 1, col); R(x, y + 4, 2, 2, col); R(x + 1, y + 3, 1, 1, col);
+  });
+}
+
+/* ───────── 滑桿狀態與物理 ───────── */
+let v = 0.35, pos = 0.35, target = 0.35, vel = 0, press = 0, pressT = 0, dragging = false, grab = 0;
+let geo = null, lastT = performance.now(), lastBeat = 0, lastTick = Math.round(v * 20), shownNum = 35;
+
+function layout() {
+  const dpr = Math.min(3, window.devicePixelRatio || 1), w = cv.clientWidth;
+  const padX = Math.max(18, w * 0.06), pillW = w - padX * 2, pillH = pillW / 3.727, h = Math.round(pillH * 1.7);
+  cv.style.height = h + 'px'; cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  const b = pillH * 0.085, ix = padX + b, iy = h / 2 - pillH / 2 + b, iw = pillW - 2 * b, ih = pillH - 2 * b;
+  const rx = pillH * 0.40, ry = pillH * 0.64;
+  geo = { dpr, w, h, padX, pillW, pillH, b, ix, iy, iw, ih, rx, ry, cy: h / 2, x0: ix + rx * 0.5, x1: ix + iw - rx * 0.5 };
+}
+const xOf = p => geo.x0 + p * (geo.x1 - geo.x0);
+const pOf = x => (x - geo.x0) / (geo.x1 - geo.x0);
+
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+
+function frame(now) {
+  if (cv.clientWidth !== geo.w) layout();
+  if (geo.w < 120) { lastT = now; requestAnimationFrame(frame); return; }   // 視窗還沒排好版就先等
+  const dt = Math.min(0.033, (now - lastT) / 1000); lastT = now;
+  // 彈簧：玻璃球追著手指，放開會輕輕彈一下
+  const k = 520, damp = dragging ? 34 : 24;
+  for (let i = 0; i < 4; i++) { const h = dt / 4; vel += ((target - pos) * k - vel * damp) * h; pos += vel * h; }
+  pressT = dragging ? 1 : 0; press += (pressT - press) * Math.min(1, dt * 14);
+  v = clamp(pos, 0, 1);
+  const n = Math.round(v * 100);
+  if (n !== shownNum) { shownNum = n; numEl.textContent = n; cv.setAttribute('aria-valuenow', n); }
+  const tk = Math.round(v * 20);
+  if (tk !== lastTick) { lastTick = tk; tick(tk === 0 || tk === 20); }
+  if (ac) {
+    master.gain.setTargetAtTime(Math.pow(v, 1.5) * 0.85, ac.currentTime, 0.03);
+    lp.frequency.setTargetAtTime(350 * Math.pow(40, v), ac.currentTime, 0.05);
+  }
+  const tt = now / 1000, beat = clock() / SPB;
+  // 音符
+  if (Math.floor(beat) !== lastBeat) {
+    lastBeat = Math.floor(beat);
+    if (v > 0.15) for (let i = 0, m = Math.ceil(v * 3); i < m; i++) {
+      const left = Math.random() < 0.5, ci = Math.floor(Math.random() * 5);
+      notes.push({ x: (left ? 143 : 187) + Math.random() * 8, y: 12, age: 0, life: 2.2 + Math.random(), seed: Math.random() * 6, sp: 5 + v * 6 + Math.random() * 3,
+        cn: ['#ffd98a', '#9db4ff', '#ff9ecd', '#8ef0c0', '#fff'][ci], cd: ['#ff5a7a', '#3f6fe0', '#ff8a00', '#12a36b', '#7a4be0'][ci] });
+    }
+  }
+  notes.forEach(n => { n.age += dt; n.y -= n.sp * dt; });
+  notes = notes.filter(n => n.age < n.life && n.y > -6);
+
+  drawScene(gA, false, v, tt, beat); drawScene(gB, true, v, tt, beat);
+
+  const G = geo, ph = beat % 1, pulse = v > 0.02 ? Math.exp(-ph * 5) : 0;
+  ctx.setTransform(G.dpr, 0, 0, G.dpr, 0, 0); ctx.clearRect(0, 0, G.w, G.h);
+  ctx.save();
+  if (v > 0.9 && !reduceMotion) { const s = (v - 0.9) * 22 * pulse; ctx.translate((Math.random() - 0.5) * s, (Math.random() - 0.5) * s); }
+
+  // 金屬外框
+  const py = G.cy - G.pillH / 2;
+  ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.55)'; ctx.shadowBlur = G.pillH * 0.22; ctx.shadowOffsetY = G.pillH * 0.10;
+  let gr = ctx.createLinearGradient(0, py, 0, py + G.pillH);
+  gr.addColorStop(0, '#a3a6ba'); gr.addColorStop(0.45, '#6a6d82'); gr.addColorStop(1, '#3a3c4e');
+  ctx.fillStyle = gr; rr(G.padX, py, G.pillW, G.pillH, G.pillH / 2); ctx.fill(); ctx.restore();
+  ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,.35)'; rr(G.padX + 1, py + 1, G.pillW - 2, G.pillH - 2, G.pillH / 2); ctx.stroke();
+  // 場景
+  ctx.save(); rr(G.ix, G.iy, G.iw, G.ih, G.ih / 2); ctx.clip();
+  ctx.imageSmoothingEnabled = false; ctx.drawImage(cA, G.ix, G.iy, G.iw, G.ih);
+  gr = ctx.createLinearGradient(0, G.iy, 0, G.iy + G.ih);
+  gr.addColorStop(0, 'rgba(0,0,10,.55)'); gr.addColorStop(0.22, 'rgba(0,0,10,0)'); gr.addColorStop(0.85, 'rgba(0,0,10,0)'); gr.addColorStop(1, 'rgba(0,0,10,.3)');
+  ctx.fillStyle = gr; ctx.fillRect(G.ix, G.iy, G.iw, G.ih); ctx.restore();
+  ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(10,10,20,.7)'; rr(G.ix, G.iy, G.iw, G.ih, G.ih / 2); ctx.stroke();
+
+  // 玻璃球
+  const kx = xOf(pos), sq = clamp(Math.abs(vel) * 0.11, 0, 0.22), sc = 1 + press * 0.07;
+  const rx = G.rx * (1 + sq) * sc, ry = G.ry * (1 - sq * 0.45) * sc, cy = G.cy;
+  ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = G.pillH * (0.16 + press * 0.1); ctx.shadowOffsetY = G.pillH * (0.07 + press * 0.05);
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.beginPath(); ctx.ellipse(kx, cy, rx, ry, 0, 0, 7); ctx.fill(); ctx.restore();
+  ctx.save(); ctx.beginPath(); ctx.ellipse(kx, cy, rx, ry, 0, 0, 7); ctx.clip();
+  const m = 1.5 + press * 0.08, dh = G.ih * m, dy = cy - (cy - G.iy) * m;
+  ctx.fillStyle = '#a5dbea'; ctx.fillRect(kx - rx, cy - ry, rx * 2, ry); ctx.fillStyle = '#cf9160'; ctx.fillRect(kx - rx, cy, rx * 2, ry);
+  ctx.fillStyle = '#a5dbea'; ctx.fillRect(kx - rx, cy - ry, rx * 2, dy + dh * (27 / 56) - (cy - ry));
+  ctx.fillStyle = '#f2b98f'; ctx.fillRect(kx - rx, dy + dh * (27 / 56), rx * 2, dh * (14 / 56));
+  ctx.imageSmoothingEnabled = false; ctx.drawImage(cB, kx - (kx - G.ix) * m, dy, G.iw * m, dh);
+  ctx.translate(kx, cy); ctx.scale(rx, ry);
+  gr = ctx.createRadialGradient(0, 0, 0.45, 0, 0, 1);
+  gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(0.8, 'rgba(255,255,255,.10)'); gr.addColorStop(0.93, 'rgba(255,255,255,.34)'); gr.addColorStop(1, 'rgba(30,30,60,.45)');
+  ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(0, 0, 1, 0, 7); ctx.fill();
+  gr = ctx.createRadialGradient(-0.3, -0.62, 0, -0.3, -0.62, 0.5);
+  gr.addColorStop(0, 'rgba(255,255,255,.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(0, 0, 1, 0, 7); ctx.fill();
+  ctx.lineCap = 'round'; ctx.lineWidth = 0.05;
+  ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.beginPath(); ctx.ellipse(0, 0, 0.84, 0.9, 0, Math.PI * 1.08, Math.PI * 1.42); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.beginPath(); ctx.ellipse(0, 0, 0.86, 0.91, 0, Math.PI * 0.1, Math.PI * 0.4); ctx.stroke();
+  ctx.restore();
+  ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.beginPath(); ctx.ellipse(kx, cy, rx - 1, ry - 1, 0, 0, 7); ctx.stroke();
+  ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(0,0,10,.4)'; ctx.beginPath(); ctx.ellipse(kx, cy, rx + 0.5, ry + 0.5, 0, 0, 7); ctx.stroke();
+  ctx.restore();
+  requestAnimationFrame(frame);
+}
+
+/* ───────── 操作：拖曳、點一下、鍵盤、滾輪 ───────── */
+const local = e => e.clientX - cv.getBoundingClientRect().left;
+const started = () => { initAudio(); hintEl.classList.add('gone'); };
+cv.addEventListener('pointerdown', e => {
+  started(); cv.setPointerCapture(e.pointerId); dragging = true; cv.classList.add('drag');
+  const x = local(e), kx = xOf(pos);
+  grab = Math.abs(x - kx) < geo.rx * 1.1 ? x - kx : 0;
+  target = clamp(pOf(x - grab), 0, 1);
+});
+cv.addEventListener('pointermove', e => { if (dragging) target = clamp(pOf(local(e) - grab), 0, 1); });
+const end = () => { dragging = false; cv.classList.remove('drag'); };
+cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+cv.addEventListener('keydown', e => {
+  const d = { ArrowRight: 0.05, ArrowUp: 0.05, ArrowLeft: -0.05, ArrowDown: -0.05, PageUp: 0.2, PageDown: -0.2 }[e.key];
+  if (d) target = clamp(target + d, 0, 1); else if (e.key === 'Home') target = 0; else if (e.key === 'End') target = 1; else return;
+  started(); e.preventDefault();
+});
+cv.addEventListener('wheel', e => { e.preventDefault(); started(); target = clamp(target - Math.sign(e.deltaY || e.deltaX) * 0.03, 0, 1); }, { passive: false });
+window.addEventListener('resize', layout);
+window.__slider = { set: p => { target = clamp(p, 0, 1); }, jump: p => { target = pos = clamp(p, 0, 1); vel = 0; }, get: () => v, audio: () => ac && ac.state };
+layout(); requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
