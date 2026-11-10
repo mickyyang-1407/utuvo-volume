@@ -111,7 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
     enum Action: UInt32, CaseIterable { case up = 0, down, mute, toggle
         var key: String { ["up", "down", "mute", "toggle"][Int(rawValue)] }
     }
-    static let widths: [CGFloat] = [300, 400, 520]
+    static let widths: [CGFloat] = [230, 290, 360]
 
     let audio = SystemVolume()
     let defaults = UserDefaults.standard
@@ -466,6 +466,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                         self.showGuide(); after(1.5) { shot(self.guideView, "3-guide.png") { print("GUI SELFTEST DONE (unsupported device)"); exit(ok ? 0 : 1) } }
                         return
                     }
+                    // 玻璃從 30% 滑到 70%，每一格都量位置：不准超過 70%，停下來後不准再動
+                    let probeJS = "window.__slider.jump(0.3); await new Promise(r => setTimeout(r, 400)); window.__slider.set(0.7); let mx = 0, t0 = performance.now(), last = []; while (performance.now() - t0 < 1500) { await new Promise(r => requestAnimationFrame(r)); const v = window.__slider.get(); mx = Math.max(mx, v); if (performance.now() - t0 > 1100) last.push(v); } return [mx, Math.min(...last), Math.max(...last)];"
+                    self.webView.callAsyncJavaScript(probeJS, arguments: [:], in: nil, in: .page) { result in
+                        if case .success(let any) = result, let r = any as? [Double], r.count == 3 {
+                            check("glass does not overshoot", r[0] <= 0.7005, String(format: "peak %.4f (target 0.7000)", r[0]))
+                            check("glass settles and stays still", r[2] - r[1] < 0.002 && abs(r[2] - 0.7) < 0.01, String(format: "last 400 ms range %.4f–%.4f", r[1], r[2]))
+                        } else { check("overshoot probe ran", false, "\(result)") }
+                        self.afterOvershootProbe(before: before, shot: shot, check: check, after: after) { print(ok ? "GUI SELFTEST PASS" : "GUI SELFTEST FAIL"); exit(ok ? 0 : 1) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func afterOvershootProbe(before: Float32, shot: @escaping (WKWebView?, String, @escaping () -> Void) -> Void,
+                                     check: @escaping (String, Bool, String) -> Void, after: @escaping (Double, @escaping () -> Void) -> Void,
+                                     finish: @escaping () -> Void) {
+        do { do { do {
                     let probe = before > 0.5 ? before - 0.25 : before + 0.25
                     self.webView.evaluateJavaScript("window.__slider.set(\(probe))", completionHandler: nil)
                     after(1.5) {
@@ -497,7 +515,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
                                             after(1.5) {
                                                 shot(self.guideView, "3-guide.png") {
                                                     check("volume restored", abs((self.audio.volume ?? -1) - before) < 0.03, String(format: "%.3f", self.audio.volume ?? -1))
-                                                    print(ok ? "GUI SELFTEST PASS" : "GUI SELFTEST FAIL"); exit(ok ? 0 : 1)
+                                                    finish()
                                                 }
                                             }
                                         }

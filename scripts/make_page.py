@@ -33,7 +33,7 @@ window.__native = {
     muted = !!st.muted; supported = !!st.supported;
     document.body.classList.toggle('off', !supported); document.body.classList.toggle('muted', muted);
     hintEl.textContent = supported ? (st.device || '') + (muted ? ' · 靜音 Muted' : '') : (st.device || '') + ' · 此輸出無法調音量 Fixed volume';
-    if (!dragging && performance.now() - lastPostT > 300 && typeof st.v === 'number') { nativeTarget = target = clamp(st.v, 0, 1); if (st.snap) { pos = target; vel = 0; } }
+    if (typeof st.v === 'number' && !dragging && performance.now() - lastPostT > 300 && (st.snap || Math.abs(st.v - target) > 0.012)) { nativeTarget = target = clamp(st.v, 0, 1); if (st.snap) { pos = target; vel = 0; } }
   },
   pause(p) { paused = !!p; }
 };
@@ -45,7 +45,10 @@ rep("  if (geo.w < 120) { lastT = now; requestAnimationFrame(frame); return; }",
 rep("  v = clamp(pos, 0, 1);\n", "  v = clamp(pos, 0, 1);\n  if (target !== nativeTarget && target !== lastPosted) { lastPosted = target; lastPostT = now; post({ v: target }); }\n  const vv = (muted || !supported) ? 0 : v;\n")
 rep("drawScene(gA, false, v, tt, beat); drawScene(gB, true, v, tt, beat);", "drawScene(gA, false, vv, tt, beat); drawScene(gB, true, vv, tt, beat);")
 rep("    if (v > 0.15) for (let i = 0, m = Math.ceil(v * 3)", "    if (vv > 0.15) for (let i = 0, m = Math.ceil(vv * 3)")
-rep("  if (v > 0.9 && !reduceMotion) {", "  if (vv > 0.9 && !reduceMotion) {")
+rep("  if (v > 0.9 && !reduceMotion) {", "  if (false) {")   # App 裡整條滑桿不震動
+# 彈簧改成臨界阻尼：玻璃直接滑到位，不來回晃；拉扁的幅度也收小
+rep("const k = 520, damp = dragging ? 34 : 24;", "const k = 520, damp = 46;")
+rep("const sq = clamp(Math.abs(vel) * 0.11, 0, 0.22)", "const sq = clamp(Math.abs(vel) * 0.035, 0, 0.08)")
 rep("layout(); requestAnimationFrame(frame);", "layout(); requestAnimationFrame(frame); post({ ready: true });")
 (root / 'Resources' / 'slider.html').write_text(s, encoding='utf-8')
 print('slider.html', len(s))

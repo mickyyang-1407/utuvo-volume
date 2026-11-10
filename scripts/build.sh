@@ -4,7 +4,7 @@
 #       scripts/build.sh --release  另外公證、裝訂、做 DMG（DMG 也簽＋公證＋裝訂）
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VERSION="0.2.0"; BUILD="2"
+VERSION="0.2.1"; BUILD="3"
 NAME="UTUVO Volume"; BID="app.utuvo.volume"
 # 簽章身分與公證設定從環境變數來；沒設就用 ad-hoc 簽章（只能在自己的機器上跑）。
 # SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" NOTARY_PROFILE="your-notarytool-profile" scripts/build.sh --release
