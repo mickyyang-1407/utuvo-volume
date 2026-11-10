@@ -186,6 +186,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler
         }
     }
 
+    /// App 已經在跑的時候再開一次（Spotlight、Launchpad、Finder 連按兩下、open -a）＝把滑桿叫出來。
+    /// 它沒有 Dock 圖示，不這樣做的話「再開一次」看起來會像沒反應。
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showPanel(interactive: true)
+        return false
+    }
+
     // MARK: 音量
 
     func step(_ a: Action, fine: Bool = false) {
